@@ -663,21 +663,14 @@ linphonec_init(int argc, char **argv)
 	}
 
 	linphonec_parse_cmdline(argc, argv);
-
-	if (trace_level > 0)
-	{
-		if (logfile_name != NULL)
-			mylogfile = fopen (logfile_name, "w+");
-
-		if (mylogfile == NULL)
-		{
-			mylogfile = stdout;
-			fprintf (stderr,
-				 "INFO: no logfile, logging to stdout\n");
-		}
+    
+    if (logfile_name != NULL)
+    {
+        mylogfile = fopen (logfile_name, "w+");
 		linphone_core_enable_logs(mylogfile);
-	}
-	else
+    }
+
+	if (trace_level == 0)
 	{
 		linphone_core_disable_logs();
 	}
