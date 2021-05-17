@@ -3390,6 +3390,81 @@ static void group_chat_room_send_two_files_plus_text (void) {
 	group_chat_room_send_file_with_or_without_text(TRUE, TRUE, FALSE);
 }
 
+static void group_chat_room_send_multipart_custom_content_types(void) {
+	LinphoneCoreManager *marie = linphone_core_manager_create("marie_rc");
+	LinphoneCoreManager *pauline = linphone_core_manager_create("pauline_rc");
+	bctbx_list_t *coresManagerList = NULL;
+	bctbx_list_t *participantsAddresses = NULL;
+	stats initialMarieStats = marie->stat;
+	stats initialPaulineStats = pauline->stat;
+	coresManagerList = bctbx_list_append(coresManagerList, marie);
+	coresManagerList = bctbx_list_append(coresManagerList, pauline);
+	bctbx_list_t *coresList = init_core_for_conference_with_groupchat_version(coresManagerList, "1.0");
+	start_core_for_conference(coresManagerList);
+	participantsAddresses = bctbx_list_append(participantsAddresses, linphone_address_new(linphone_core_get_identity(pauline->lc)));
+
+	const char *initialSubject = "Colleagues";
+	LinphoneChatRoom *marieCr = create_chat_room_client_side(coresList, marie, &initialMarieStats, participantsAddresses, initialSubject, FALSE);
+	const LinphoneAddress *confAddr = linphone_chat_room_get_conference_address(marieCr);
+
+	// Check that the chat room is correctly created on Pauline's side and that the participants are added
+	LinphoneChatRoom *paulineCr = check_creation_chat_room_client_side(coresList, pauline, &initialPaulineStats, confAddr, initialSubject, 1, FALSE);
+
+	// Add our custom content types
+	linphone_core_add_content_type_support(marie->lc, "application/vnd.3gpp.mcptt-info+xml");
+	linphone_core_add_content_type_support(marie->lc, "application/vnd.3gpp.mcptt-location-info+xml");
+	linphone_core_add_content_type_support(pauline->lc, "application/vnd.3gpp.mcptt-info+xml");
+	linphone_core_add_content_type_support(pauline->lc, "application/vnd.3gpp.mcptt-location-info+xml");
+
+	const char *data1 = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><mcpttinfo xmlns=\"urn:3gpp:ns:mcpttInfo:1.0\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"><mcptt-Params><mcptt-request-uri type=\"Normal\"><mcpttURI>sip:test@sip.example.org</mcpttURI></mcptt-request-uri></mcptt-Params></mcpttinfo>";
+	const char *data2 = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><location-info xmlns=\"urn:3gpp:ns:mcpttILocationInfo:1.0\"><Configuration><NonEmergencyLocationInformation><ServingEcgi/><NeighbouringEcgi/><MbmsSaId/><MbsfnArea/><GeographicalCoordinate/><minimumIntervalLength>10</minimumIntervalLength></NonEmergencyLocationInformation><TriggeringCriteria><CellChange><AnyCellChange TriggerId=\"AnyCellChange\"/></CellChange><TrackingAreaChange><AnyTrackingAreaChange TriggerId=\"AnyTrackingAreaChange\"/></TrackingAreaChange><PlmnChange><AnyPlmnChange TriggerId=\"AnyPlmnChange\"/></PlmnChange><PeriodicReport TriggerId=\"Periodic\">20</PeriodicReport><GeographicalAreaChange><AnyAreaChange TriggerId=\"177db491c22\"></AnyAreaChange></GeographicalAreaChange></TriggeringCriteria></Configuration></location-info>";
+
+	LinphoneChatMessage *msg;
+	msg = linphone_chat_room_create_empty_message(marieCr);
+
+	LinphoneContent *content = linphone_factory_create_content(linphone_factory_get());
+	linphone_content_set_type(content, "application");
+	linphone_content_set_subtype(content, "vnd.3gpp.mcptt-info+xml");
+	linphone_content_set_utf8_text(content, data1);
+	linphone_chat_message_add_content(msg, content);
+	linphone_content_unref(content);
+
+	content = linphone_factory_create_content(linphone_factory_get());
+	linphone_content_set_type(content, "application");
+	linphone_content_set_subtype(content, "vnd.3gpp.mcptt-location-info+xml");
+	linphone_content_set_utf8_text(content, data2);
+	linphone_chat_message_add_content(msg, content);
+	linphone_content_unref(content);
+
+	linphone_chat_message_send(msg);
+	BC_ASSERT_TRUE(wait_for(pauline->lc, marie->lc, &pauline->stat.number_of_LinphoneMessageReceived, 1));
+	linphone_chat_message_unref(msg);
+
+	if (pauline->stat.last_received_chat_message) {
+		const bctbx_list_t* contents = linphone_chat_message_get_contents(pauline->stat.last_received_chat_message);
+		BC_ASSERT_EQUAL(bctbx_list_size(contents), 2, int, "%d");
+
+		LinphoneContent *content1 = bctbx_list_get_data(contents);
+		BC_ASSERT_STRING_EQUAL(linphone_content_get_type(content1), "application");
+		BC_ASSERT_STRING_EQUAL(linphone_content_get_subtype(content1), "vnd.3gpp.mcptt-info+xml");
+		BC_ASSERT_STRING_EQUAL(linphone_content_get_utf8_text(content1), data1);
+
+		LinphoneContent *content2 = bctbx_list_nth_data(contents, 1);
+		BC_ASSERT_STRING_EQUAL(linphone_content_get_type(content2), "application");
+		BC_ASSERT_STRING_EQUAL(linphone_content_get_subtype(content2), "vnd.3gpp.mcptt-location-info+xml");
+		BC_ASSERT_STRING_EQUAL(linphone_content_get_utf8_text(content2), data2);
+	}
+
+	// Clean db from chat room
+	linphone_core_manager_delete_chat_room(marie, marieCr, coresList);
+	linphone_core_manager_delete_chat_room(pauline, paulineCr, coresList);
+
+	bctbx_list_free(coresList);
+	bctbx_list_free(coresManagerList);
+	linphone_core_manager_destroy(marie);
+	linphone_core_manager_destroy(pauline);
+}
+
 static void group_chat_room_unique_one_to_one_chat_room_base(bool_t secondDeviceForSender) {
 	LinphoneCoreManager *marie = linphone_core_manager_create("marie_rc");
 	LinphoneCoreManager *marie2 = NULL;
@@ -4361,6 +4436,12 @@ static void exhume_one_to_one_chat_room_1(void) {
 			if (marieOneToOneCr) {
 				int marie_messages = linphone_chat_room_get_history_size(marieOneToOneCr);
 				BC_ASSERT_EQUAL(marie_messages, 1, int , "%d");
+
+				LinphoneChatMessage *exhume_answer_message = linphone_chat_room_create_message_from_utf8(marieOneToOneCr, "Nooooooooooooo !");
+				linphone_chat_message_send(exhume_answer_message);
+				BC_ASSERT_TRUE(wait_for_list(coresList, &marie->stat.number_of_LinphoneMessageSent, 1, 5000));
+				BC_ASSERT_TRUE(wait_for_list(coresList, &pauline->stat.number_of_LinphoneMessageReceived, 1, 5000));
+				linphone_chat_message_unref(exhume_answer_message);
 			}
 		}
 
@@ -4460,6 +4541,12 @@ static void exhume_one_to_one_chat_room_2(void) {
 			if (paulineOneToOneCr2) {
 				int pauline_messages = linphone_chat_room_get_history_size(paulineOneToOneCr2);
 				BC_ASSERT_EQUAL(pauline_messages, 2, int , "%d");
+
+				LinphoneChatMessage *exhume_answer_message = linphone_chat_room_create_message_from_utf8(paulineOneToOneCr2, "Your focus determines your reality.");
+				linphone_chat_message_send(exhume_answer_message);
+				BC_ASSERT_TRUE(wait_for_list(coresList, &pauline->stat.number_of_LinphoneMessageSent, 2, 5000));
+				BC_ASSERT_TRUE(wait_for_list(coresList, &marie->stat.number_of_LinphoneMessageReceived, 2, 5000));
+				linphone_chat_message_unref(exhume_answer_message);
 			}
 		}
 
@@ -4780,6 +4867,12 @@ static void exhume_one_to_one_chat_room_4(void) {
 			if (marieOneToOneCr) {
 				int marie_messages = linphone_chat_room_get_history_size(marieOneToOneCr);
 				BC_ASSERT_EQUAL(marie_messages, 1, int , "%d");
+
+				LinphoneChatMessage *exhume_answer_message = linphone_chat_room_create_message_from_utf8(marieOneToOneCr, "In my experience there is no such thing as luck.");
+				linphone_chat_message_send(exhume_answer_message);
+				BC_ASSERT_TRUE(wait_for_list(coresList, &marie->stat.number_of_LinphoneMessageSent, 1, 5000));
+				BC_ASSERT_TRUE(wait_for_list(coresList, &pauline->stat.number_of_LinphoneMessageReceived, 1, 5000));
+				linphone_chat_message_unref(exhume_answer_message);
 			}
 		}
 
@@ -6590,6 +6683,114 @@ static void group_chat_room_admin_creator_leaves_and_is_reinvited (void) {
 	linphone_core_manager_destroy(laure);
 }
 
+
+static void group_chat_forward_file_transfer_message_url (const char *file_transfer_server_url) {
+	LinphoneCoreManager *marie = linphone_core_manager_create("marie_rc");
+	LinphoneCoreManager *pauline = linphone_core_manager_create("pauline_rc");
+	bctbx_list_t *coresManagerList = NULL;
+	bctbx_list_t *participantsAddresses = NULL;
+	char *sendFilepath = bc_tester_res("sounds/sintel_trailer_opus_h264.mkv");
+	char *receivePaulineFilepath = bc_tester_file("receive_file_pauline.dump");
+	char *receiveMarieFilepath = bc_tester_file("receive_file_marie.dump");
+	int dummy = 0;
+	/* Remove any previously downloaded file */
+	remove(receivePaulineFilepath);
+	remove(receiveMarieFilepath);
+
+
+	coresManagerList = bctbx_list_append(coresManagerList, marie);
+	coresManagerList = bctbx_list_append(coresManagerList, pauline);
+
+	linphone_core_set_file_transfer_server(marie->lc, file_transfer_server_url);
+	linphone_core_set_file_transfer_server(pauline->lc, file_transfer_server_url);
+
+	bctbx_list_t *coresList = init_core_for_conference(coresManagerList);
+	start_core_for_conference(coresManagerList);
+	participantsAddresses = bctbx_list_append(participantsAddresses, linphone_address_new(linphone_core_get_identity(pauline->lc)));
+	stats initialMarieStats = marie->stat;
+	stats initialPaulineStats = pauline->stat;
+
+
+	// Marie creates a new group chat room
+	const char *initialSubject = "Pauline";
+	LinphoneChatRoom *marieCr = create_chat_room_client_side(coresList, marie, &initialMarieStats, participantsAddresses, initialSubject, FALSE);
+	const LinphoneAddress *confAddr = linphone_chat_room_get_conference_address(marieCr);
+
+	// Check that the chat room is correctly created on Pauline's side and that the participants are added
+	LinphoneChatRoom *paulineCr = check_creation_chat_room_client_side(coresList, pauline, &initialPaulineStats, confAddr, initialSubject, 1, FALSE);
+	BC_ASSERT_TRUE(linphone_chat_room_get_capabilities(paulineCr) & LinphoneChatRoomCapabilitiesOneToOne);
+
+	// Marie sends a message
+	_send_file(marieCr, sendFilepath, NULL, FALSE);
+	wait_for_list(coresList, &dummy, 1, 10000);
+	// Check pauline got it
+	// Note: we must not use the buffer reception(last param to FALSE) or our message transfer won't work, probably some fix to be done in the callback
+	_receive_file(coresList, pauline, &initialPaulineStats, receivePaulineFilepath, sendFilepath, NULL, FALSE);
+
+	// Retrieve message from Pauline chatroom history
+	BC_ASSERT_EQUAL(linphone_chat_room_get_history_size(paulineCr), 1, int," %i");
+	if (linphone_chat_room_get_history_size(paulineCr) > 0) {
+		bctbx_list_t *history = linphone_chat_room_get_history(paulineCr, 1);
+		LinphoneChatMessage *recv_msg = (LinphoneChatMessage *)(history->data);
+
+		// Forward it to Marie
+		LinphoneChatMessage *msg = linphone_chat_room_create_forward_message(paulineCr, recv_msg);
+		const LinphoneAddress *forwarded_from_address = linphone_chat_message_get_from_address(recv_msg);
+		char *forwarded_from = linphone_address_as_string_uri_only(forwarded_from_address);
+
+		bctbx_list_free_with_data(history, (bctbx_list_free_func)linphone_chat_message_unref);
+
+		LinphoneChatMessageCbs *cbs = linphone_chat_message_get_callbacks(msg);
+		linphone_chat_message_cbs_set_msg_state_changed(cbs, liblinphone_tester_chat_message_msg_state_changed);
+		linphone_chat_message_send(msg);
+
+		BC_ASSERT_TRUE(linphone_chat_message_is_forward(msg));
+		BC_ASSERT_STRING_EQUAL(linphone_chat_message_get_forward_info(msg), forwarded_from);
+
+		// Check Marie received it and that the file is still the same
+		_receive_file(coresList, marie, &initialMarieStats, receiveMarieFilepath, sendFilepath, NULL, FALSE);
+
+		linphone_chat_message_unref(msg);
+		ms_free(forwarded_from);
+	} else {
+		BC_FAIL("Could not get message to forward from history");
+	}
+
+	// Clean db from chat room
+	linphone_core_manager_delete_chat_room(marie, marieCr, coresList);
+	linphone_core_manager_delete_chat_room(pauline, paulineCr, coresList);
+
+	wait_for_list(coresList, 0, 1, 2000);
+	BC_ASSERT_EQUAL(linphone_core_get_call_history_size(marie->lc), 0, int,"%i");
+	BC_ASSERT_EQUAL(linphone_core_get_call_history_size(pauline->lc), 0, int,"%i");
+	BC_ASSERT_PTR_NULL(linphone_core_get_call_logs(marie->lc));
+	BC_ASSERT_PTR_NULL(linphone_core_get_call_logs(pauline->lc));
+
+	//linphone_address_unref(confAddr);
+	bctbx_list_free(coresList);
+	bctbx_list_free(coresManagerList);
+	linphone_core_manager_destroy(marie);
+	linphone_core_manager_destroy(pauline);
+}
+
+static void group_chat_forward_file_transfer_message (void) {
+	group_chat_forward_file_transfer_message_url(file_transfer_url);
+}
+
+static void group_chat_forward_file_transfer_message_digest_auth_server (void) {
+	group_chat_forward_file_transfer_message_url(file_transfer_url_digest_auth);
+}
+
+static void group_chat_forward_file_transfer_message_digest_auth_server_encryptedFS (void) {
+	uint8_t evfs_key[32] = {0xaa, 0x55, 0xFF, 0xFF, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x11, 0x22, 0x33, 0x44,
+				0x5a, 0xa5, 0x5F, 0xaF, 0x52, 0xa4, 0xa6, 0x58, 0xaa, 0x5c, 0xae, 0x50, 0xa1, 0x52, 0xa3, 0x54};
+	linphone_factory_set_vfs_encryption(linphone_factory_get(), LINPHONE_VFS_ENCRYPTION_AES256GCM128_SHA256, evfs_key, 32);
+
+	group_chat_forward_file_transfer_message_url(file_transfer_url_digest_auth);
+
+	linphone_factory_set_vfs_encryption(linphone_factory_get(), LINPHONE_VFS_ENCRYPTION_UNSET, NULL, 0);
+}
+
 test_t group_chat_tests[] = {
 	TEST_NO_TAG("Chat room params", group_chat_room_params),
 	TEST_NO_TAG("Chat room with forced local identity", group_chat_room_creation_with_given_identity),
@@ -6634,6 +6835,7 @@ test_t group_chat_tests[] = {
 	TEST_NO_TAG("Send file using buffer", group_chat_room_send_file_2),
 	TEST_NO_TAG("Send file + text", group_chat_room_send_file_plus_text),
 	TEST_NO_TAG("Send 2 files + text", group_chat_room_send_two_files_plus_text),
+	TEST_NO_TAG("Send multipart message with custom content types", group_chat_room_send_multipart_custom_content_types),
 	TEST_NO_TAG("Unique one-to-one chatroom", group_chat_room_unique_one_to_one_chat_room),
 	TEST_NO_TAG("Unique one-to-one chatroom with dual sender device", group_chat_room_unique_one_to_one_chat_room_dual_sender_device),
 	TEST_NO_TAG("Unique one-to-one chatroom recreated from message", group_chat_room_unique_one_to_one_chat_room_recreated_from_message),
@@ -6667,6 +6869,9 @@ test_t group_chat_tests[] = {
 	TEST_ONE_TAG("Subscribe successfull after set chat database path", subscribe_test_after_set_chat_database_path, "LeaksMemory" /*due to core restart*/),
 	TEST_NO_TAG("Make sure device unregistration does not triger user to be removed from a group", group_chat_room_device_unregistered),
 	TEST_NO_TAG("Admin leaves the room and is reinvited", group_chat_room_admin_creator_leaves_and_is_reinvited),
+	TEST_NO_TAG("Forward file transfer message", group_chat_forward_file_transfer_message),
+	TEST_NO_TAG("Forward file transfer message using digest auth on server", group_chat_forward_file_transfer_message_digest_auth_server),
+	TEST_NO_TAG("Forward file transfer message using digest auth on server and encrypted FS", group_chat_forward_file_transfer_message_digest_auth_server_encryptedFS),
 };
 
 test_suite_t group_chat_test_suite = {

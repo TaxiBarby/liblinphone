@@ -157,7 +157,7 @@ LINPHONE_PUBLIC int linphone_proxy_config_get_publish_expires(const LinphoneProx
 
 /**
  * Sets whether liblinphone should replace "+" by international calling prefix in dialed numbers (passed to
- * #linphone_core_invite ).
+ * #linphone_core_invite() ).
  * @param proxy_config #LinphoneProxyConfig object. @notnil
  * @param enable TRUE to replace + by the international prefix, FALSE otherwise.
 **/
@@ -253,7 +253,7 @@ LINPHONE_PUBLIC void linphone_proxy_config_set_realm(LinphoneProxyConfig *proxy_
 /**
  * Gets the list of the routes set for this proxy config.
  * @param proxy_config #LinphoneProxyConfig object. @notnil
- * @return \bctbx_list{const char *} the list of routes. @maybenil
+ * @return The list of routes as string. \bctbx_list{const char *} @maybenil
  */
 LINPHONE_PUBLIC const bctbx_list_t* linphone_proxy_config_get_routes(const LinphoneProxyConfig *proxy_config);
 
@@ -414,7 +414,7 @@ LINPHONE_PUBLIC bool_t linphone_proxy_config_is_phone_number(LinphoneProxyConfig
  * This function will always generate a normalized username if input is a phone number.
  * @param proxy_config #LinphoneProxyConfig object containing country code and/or escape symbol. If NULL passed, will use default configuration. @maybenil
  * @param username the string to parse @notnil
- * @return NULL if input is an invalid phone number, normalized phone number from username input otherwise. @maybenil
+ * @return NULL if input is an invalid phone number, normalized phone number from username input otherwise. @maybenil @tobefreed
 */
 LINPHONE_PUBLIC char* linphone_proxy_config_normalize_phone_number(LinphoneProxyConfig *proxy_config, const char *username);
 
@@ -429,7 +429,7 @@ LINPHONE_PUBLIC char* linphone_proxy_config_normalize_phone_number(LinphoneProxy
  * The result is a syntactically correct SIP address.
  * @param proxy_config #LinphoneProxyConfig object containing country code, escape symbol and/or domain name. Can be NULL if domain is already provided. @maybenil
  * @param username the string to parse @notnil
- * @return NULL if invalid input, normalized sip address otherwise. @maybenil
+ * @return NULL if invalid input, normalized sip address otherwise. @maybenil @tobefreed
 */
 LINPHONE_PUBLIC LinphoneAddress* linphone_proxy_config_normalize_sip_uri(LinphoneProxyConfig *proxy_config, const char *username);
 
@@ -449,8 +449,9 @@ LINPHONE_PUBLIC LinphonePrivacyMask linphone_proxy_config_get_privacy(const Linp
 
 /**
  * Set the http file transfer server to be used for content type application/vnd.gsma.rcs-ft-http+xml
+ * Url may be like: "https://file.linphone.org/upload.php".
  * @param proxy_config #LinphoneProxyConfig object. @notnil
- * @param server_url URL of the file server like https://file.linphone.org/upload.php @maybenil
+ * @param server_url URL of the file server. @maybenil
  * @warning That function isn't implemented yet.
  * @donotwrap
  * */
@@ -458,8 +459,9 @@ LINPHONE_PUBLIC void linphone_proxy_config_set_file_transfer_server(LinphoneProx
 
 /**
  * Get the http file transfer server to be used for content type application/vnd.gsma.rcs-ft-http+xml
+ * Url may be like: "https://file.linphone.org/upload.php".
  * @param proxy_config #LinphoneProxyConfig object. @notnil
- * @return URL of the file server like https://file.linphone.org/upload.php @maybenil
+ * @return URL of the file server. @maybenil
  * @warning That function isn't implemented yet.
  * @donotwrap
  * */

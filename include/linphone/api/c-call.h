@@ -339,7 +339,7 @@ LINPHONE_PUBLIC LinphoneStatus linphone_call_send_dtmfs (LinphoneCall *call, con
  * Stop current DTMF sequence sending.
  *
  * Please note that some DTMF could be already sent,
- * depending on when this function call is delayed from #linphone_call_send_dtmfs. This
+ * depending on when this function call is delayed from #linphone_call_send_dtmfs(). This
  * function will be automatically called if call state change to anything but LinphoneCallStreamsRunning.
  * @param call The #LinphoneCall object @notnil
 **/
@@ -926,7 +926,7 @@ LINPHONE_PUBLIC LinphoneStatus linphone_call_transfer (LinphoneCall *call, const
  * Returns the remote address associated to this call as a string.
  * The result string must be freed by user using ms_free().
  * @param call #LinphoneCall object. @notnil
- * @return the remote address as a string. @maybenil
+ * @return the remote address as a string. @maybenil @tobefreed
  * @deprecated 06/07/2020 use linphone_call_get_remote_address() instead.
 **/
 LINPHONE_PUBLIC LINPHONE_DEPRECATED char *linphone_call_get_remote_address_as_string (const LinphoneCall *call);

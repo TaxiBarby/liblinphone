@@ -407,6 +407,13 @@ ChatMessageModifier::Result LimeX3dhEncryptionEngine::processIncomingMessage (
 		}
 	}
 
+	// Early discard of malformed incoming message: we must have a sender Id to decrypt the message
+	if (senderDeviceId.empty()) {
+			lWarning() << "[LIME] discard malformed incoming message ["<< message <<"] for ["<<localDeviceId<<"]: no sender Device Id found ";
+			errorCode = 488; // Not Acceptable
+			return ChatMessageModifier::Result::Done;
+	}
+
 	// Discard incoming messages from unsafe peer devices
 	lime::PeerDeviceStatus peerDeviceStatus = limeManager->get_peerDeviceStatus(senderDeviceId);
 	if (linphone_config_get_int(linphone_core_get_config(chatRoom->getCore()->getCCore()), "lime", "allow_message_in_unsafe_chatroom", 0) == 0) {
@@ -668,6 +675,12 @@ void LimeX3dhEncryptionEngine::mutualAuthentication (
 	SalMediaDescription *remoteMediaDescription,
 	LinphoneCallDir direction
 ) {
+	// Check we have remote and local media description (remote could be null when a call without SDP is received)
+	if ( !localMediaDescription || !remoteMediaDescription) {
+		lInfo() << "[LIME] Missing media description to get identity keys for mutual authentication, do not set auxiliary secret from identity keys";
+		return;
+	}
+
 	// Get local and remote identity keys from sdp attributes
 	std::string LocalIkB64;
 	const char *charLocalLimeIk = sal_custom_sdp_attribute_find(localMediaDescription->custom_sdp_attributes, "lime-Ik");
@@ -882,6 +895,14 @@ void LimeX3dhEncryptionEngine::cleanDb () {
 
 std::shared_ptr<LimeManager> LimeX3dhEncryptionEngine::getLimeManager () {
 	return limeManager;
+}
+
+void LimeX3dhEncryptionEngine::stale_session (const std::string localDeviceId, const std::string peerDeviceId) {
+	try {
+		limeManager->stale_sessions(localDeviceId, peerDeviceId);
+	} catch (const BctbxException &e) {
+		lError() << "[LIME] fail to stale session between local ["<<localDeviceId<<"] and "<<" remote ["<<peerDeviceId<<"]. lime says: "<<e.what();
+	}
 }
 
 lime::limeCallback LimeX3dhEncryptionEngine::setLimeCallback (string operation) {

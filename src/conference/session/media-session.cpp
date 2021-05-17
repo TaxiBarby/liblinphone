@@ -243,33 +243,44 @@ bool MediaSessionPrivate::failure () {
 			break;
 		case SalReasonUnsupportedContent: /* This is for compatibility: linphone sent 415 because of SDP offer answer failure */
 		case SalReasonNotAcceptable:
-			lInfo() << "Outgoing CallSession [" << q << "] failed with SRTP and/or AVPF enabled";
-			if ((state == CallSession::State::OutgoingInit) || (state == CallSession::State::OutgoingProgress)
-				|| (state == CallSession::State::OutgoingRinging) /* Push notification case */ || (state == CallSession::State::OutgoingEarlyMedia)) {
-				for (int i = 0; i < localDesc->nb_streams; i++) {
-					if (!sal_stream_description_enabled(&localDesc->streams[i]))
-						continue;
-					if (getParams()->getMediaEncryption() == LinphoneMediaEncryptionSRTP) {
-						if (getParams()->avpfEnabled()) {
-							if (i == 0)
-								lInfo() << "Retrying CallSession [" << q << "] with SAVP";
-							getParams()->enableAvpf(false);
-							restartInvite();
-							return true;
-						} else if (!linphone_core_is_media_encryption_mandatory(q->getCore()->getCCore())) {
+			if ((state == CallSession::State::OutgoingInit) 
+				|| (state == CallSession::State::OutgoingProgress)
+				|| (state == CallSession::State::OutgoingRinging) /* Push notification case */ 
+				|| (state == CallSession::State::OutgoingEarlyMedia)) {
+				bool mediaEncrptionSrtp = getParams()->getMediaEncryption() == LinphoneMediaEncryptionSRTP;
+				bool avpfEnabled = getParams()->avpfEnabled();
+				if (mediaEncrptionSrtp || avpfEnabled) {
+					lInfo() << "Outgoing CallSession [" << q << "] failed with SRTP and/or AVPF enabled";
+					string previousCallId = op->getCallId();
+
+					for (int i = 0; i < localDesc->nb_streams; i++) {
+						if (!sal_stream_description_enabled(&localDesc->streams[i]))
+							continue;
+						if (mediaEncrptionSrtp) {
+							if (avpfEnabled) {
+								if (i == 0)
+									lInfo() << "Retrying CallSession [" << q << "] with SAVP";
+								getParams()->enableAvpf(false);
+								restartInvite();
+								linphone_core_notify_call_id_updated(q->getCore()->getCCore(), previousCallId.c_str(), op->getCallId().c_str());
+								return true;
+							} else if (!linphone_core_is_media_encryption_mandatory(q->getCore()->getCCore())) {
+								if (i == 0)
+									lInfo() << "Retrying CallSession [" << q << "] with AVP";
+								getParams()->setMediaEncryption(LinphoneMediaEncryptionNone);
+								memset(localDesc->streams[i].crypto, 0, sizeof(localDesc->streams[i].crypto));
+								restartInvite();
+								linphone_core_notify_call_id_updated(q->getCore()->getCCore(), previousCallId.c_str(), op->getCallId().c_str());
+								return true;
+							}
+						} else if (avpfEnabled) {
 							if (i == 0)
 								lInfo() << "Retrying CallSession [" << q << "] with AVP";
-							getParams()->setMediaEncryption(LinphoneMediaEncryptionNone);
-							memset(localDesc->streams[i].crypto, 0, sizeof(localDesc->streams[i].crypto));
+							getParams()->enableAvpf(false);
 							restartInvite();
+							linphone_core_notify_call_id_updated(q->getCore()->getCCore(), previousCallId.c_str(), op->getCallId().c_str());
 							return true;
 						}
-					} else if (getParams()->avpfEnabled()) {
-						if (i == 0)
-							lInfo() << "Retrying CallSession [" << q << "] with AVP";
-						getParams()->enableAvpf(false);
-						restartInvite();
-						return true;
 					}
 				}
 			}
@@ -324,7 +335,7 @@ void MediaSessionPrivate::remoteRinging () {
 		q->getRemoteParams();
 		/* Accept early media */
 
-		if (getStreamsGroup().isStarted()){
+		if (rmd && getStreamsGroup().isStarted()){
 			OfferAnswerContext ctx;
 			ctx.localMediaDescription = localDesc;
 			ctx.resultMediaDescription = md;
@@ -1626,6 +1637,7 @@ void MediaSessionPrivate::updateStreams (SalMediaDescription *newMd, CallSession
 	ctx.localMediaDescription = localDesc;
 	ctx.remoteMediaDescription = op->getRemoteMediaDescription();
 	ctx.resultMediaDescription = resultDesc;
+	ctx.localIsOfferer = localIsOfferer;
 	getStreamsGroup().render(ctx, targetState);
 
 	bool isInLocalConference = getParams()->getPrivate()->getInConference();
@@ -1785,7 +1797,8 @@ LinphoneStatus MediaSessionPrivate::pause () {
 	string subject;
 	if (sal_media_description_has_dir(resultDesc, SalStreamSendRecv))
 		subject = "Call on hold";
-	else if (sal_media_description_has_dir(resultDesc, SalStreamRecvOnly))
+	else if (sal_media_description_has_dir(resultDesc, SalStreamRecvOnly) 
+				 || (sal_media_description_has_dir(resultDesc, SalStreamInactive) && state == CallSession::State::PausedByRemote))	// Stream is inactive from Remote
 		subject = "Call on hold for me too";
 	else {
 		lError() << "No reason to pause this call, it is already paused or inactive";
@@ -1814,10 +1827,8 @@ int MediaSessionPrivate::restartInvite () {
 }
 
 void MediaSessionPrivate::setTerminated () {
-	L_Q();
 	freeResources();
 	CallSessionPrivate::setTerminated();
-	q->getCore()->soundcardHintCheck();
 }
 
 LinphoneStatus MediaSessionPrivate::startAcceptUpdate (CallSession::State nextState, const string &stateInfo) {
@@ -2000,6 +2011,9 @@ void MediaSessionPrivate::startAccept(){
 		if (q->getCore()->getCCore()->sound_conf.capt_sndcard)
 			ms_snd_card_set_preferred_sample_rate(q->getCore()->getCCore()->sound_conf.capt_sndcard, localDesc->streams[0].max_rate);
 	}
+
+	/* We shall already have all the information to prepare the zrtp/lime mutual authentication */
+	performMutualAuthentication();
 
 	CallSessionPrivate::accept(nullptr);
 	if (!getParams()->getPrivate()->getInConference() && listener){
@@ -2359,6 +2373,8 @@ void MediaSession::initiateIncoming () {
 			 */
 			if (d->deferIncomingNotification) {
 				auto incomingNotificationTask = [d](){
+					/* There is risk that the call can be terminated before this task is executed, for example if offer/answer fails.*/
+					if (d->state != State::Idle) return;
 					d->deferIncomingNotification = false;
 					d->updateLocalMediaDescriptionFromIce(d->localIsOfferer);
 					d->startIncomingNotification();

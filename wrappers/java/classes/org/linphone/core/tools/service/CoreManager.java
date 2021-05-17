@@ -32,6 +32,7 @@ import android.os.Build;
 
 import org.linphone.core.AudioDevice;
 import org.linphone.core.Call;
+import org.linphone.core.Config;
 import org.linphone.core.Core;
 import org.linphone.core.CoreListenerStub;
 import org.linphone.core.tools.Log;
@@ -103,7 +104,7 @@ public class CoreManager {
         if (isAndroidXMediaAvailable()) {
             mAudioHelper = new AudioHelper(mContext);
         } else {
-            Log.w("[Core Manager] Do you have a dependency on androidx.media:media package?");
+            Log.w("[Core Manager] Do you have a dependency on androidx.media:media:1.2.0 or newer?");
         }
         mBluetoothHelper = new BluetoothHelper(mContext);
 
@@ -114,7 +115,35 @@ public class CoreManager {
         Log.i("[Core Manager] Registering shutdown receiver");
         mContext.registerReceiver(mShutdownReceiver, shutdownIntentFilter);
 
+        mServiceClass = getServiceClass();
+        if (mServiceClass == null) mServiceClass = CoreService.class;
+
         Log.i("[Core Manager] Ready");
+    }
+
+    public void destroy() {
+        Log.i("[Core Manager] Destroying");
+
+        if (mActivityCallbacks != null) {
+            ((Application) mContext).unregisterActivityLifecycleCallbacks(mActivityCallbacks);
+            mActivityCallbacks = null;
+        }
+
+        if (mBluetoothHelper != null) {
+            mBluetoothHelper.destroy(mContext);
+            mBluetoothHelper = null;
+        }
+
+        if (mShutdownReceiver != null) {
+            Log.i("[Core Manager] Unregistering shutdown receiver");
+            mContext.unregisterReceiver(mShutdownReceiver);
+            mShutdownReceiver = null;
+        }
+
+        mServiceClass = null;
+        mAudioHelper = null;
+        mContext = null;
+        sInstance = null;
     }
 
     public Core getCore() {
@@ -168,6 +197,7 @@ public class CoreManager {
             @Override
             public void onLastCallEnded(Core core) {
                 Log.i("[Core Manager] Last call ended");
+                if (mAudioHelper == null) return;
                 if (core.isNativeRingingEnabled()) {
                     mAudioHelper.stopRinging();
                 } else {
@@ -178,6 +208,7 @@ public class CoreManager {
 
             @Override
             public void onCallStateChanged(Core core, Call call, Call.State state, String message) {
+                if (mAudioHelper == null) return;
                 if (state == Call.State.IncomingReceived && core.getCallsNb() == 1) {
                     if (core.isNativeRingingEnabled()) {
                         Log.i("[Core Manager] Incoming call received, no other call, start ringing");
@@ -186,11 +217,25 @@ public class CoreManager {
                         Log.i("[Core Manager] Incoming call received, no other call, acquire ringing audio focus");
                         mAudioHelper.requestRingingAudioFocus();
                     }
+                } else if (state == Call.State.IncomingEarlyMedia && core.getCallsNb() == 1) {
+                    if (core.getRingDuringIncomingEarlyMedia()) {
+                        Log.i("[Core Manager] Incoming call is early media and ringing is allowed");
+                    } else {
+                        if (core.isNativeRingingEnabled()) {
+                            Log.w("[Core Manager] Incoming call is early media and ringing is disabled, stop ringing");
+                            mAudioHelper.stopRinging();
+                        } else {
+                            Log.w("[Core Manager] Incoming call is early media and ringing is disabled, release ringing audio focus but acquire call audio focus");
+                            mAudioHelper.releaseRingingAudioFocus();
+                            mAudioHelper.requestCallAudioFocus();
+                        }
+                    }
                 } else if (state == Call.State.Connected) {
                     if (call.getDir() == Call.Dir.Incoming && core.isNativeRingingEnabled()) {
                         Log.i("[Core Manager] Stop incoming call ringing");
                         mAudioHelper.stopRinging();
                     } else {
+                        Log.i("[Core Manager] Stop incoming call ringing audio focus");
                         mAudioHelper.releaseRingingAudioFocus();
                     }
                 } else if (state == Call.State.OutgoingInit && core.getCallsNb() == 1) {
@@ -201,19 +246,11 @@ public class CoreManager {
                     mAudioHelper.requestCallAudioFocus();
                 }
             }
-        };        
-        if (mAudioHelper != null) mCore.addListener(mListener);
+        };
+        
+        mCore.addListener(mListener);
 
-        try {
-            mServiceClass = getServiceClass();
-            if (mServiceClass == null) mServiceClass = CoreService.class;
-            //startService();
-        } catch (IllegalStateException ise) {
-            Log.w("[Core Manager] Failed to start service: ", ise);
-            // On Android > 8, if app in background, startService will trigger an IllegalStateException when called from background
-            // If not whitelisted temporary by the system like after a push, so assume background
-            mCore.enterBackground();
-        }
+        Log.i("[Core Manager] Started");
     }
 
     public void stop() {
@@ -222,16 +259,14 @@ public class CoreManager {
     }
 
     public void onLinphoneCoreStop() {
-        Log.i("[Core Manager] Destroying");
+        Log.i("[Core Manager] Core stopped");
 
-        if (mShutdownReceiver != null) {
-            Log.i("[Core Manager] Unregistering shutdown receiver");
-            mContext.unregisterReceiver(mShutdownReceiver);
-            mShutdownReceiver = null;
+        if (isServiceRunning()) {
+            Log.i("[Core Manager] Stopping service ", mServiceClass.getName());
+            mContext.stopService(new Intent().setClass(mContext, mServiceClass));
         }
 
-        mContext.stopService(new Intent().setClass(mContext, mServiceClass));
-        Log.i("[Core Manager] Stopping service ", mServiceClass.getName());
+        mCore.removeListener(mListener);
 
         if (mTimer != null) {
             mTimer.cancel();
@@ -255,18 +290,28 @@ public class CoreManager {
 
     public void onAudioFocusLost() {
         if (mCore != null) {
-            if (mCore.isInConference()) {
-              Log.i("[Core Manager] App has lost audio focus, leaving conference");
-              mCore.leaveConference();
+            boolean pauseCallsWhenAudioFocusIsLost = mCore.getConfig().getBool("audio", "android_pause_calls_when_audio_focus_lost", true);
+            if (pauseCallsWhenAudioFocusIsLost) {
+                if (mCore.isInConference()) {
+                    Log.i("[Core Manager] App has lost audio focus, leaving conference");
+                    mCore.leaveConference();
+                } else {
+                    Log.i("[Core Manager] App has lost audio focus, pausing all calls");
+                    mCore.pauseAllCalls();
+                }
             } else {
-              Log.i("[Core Manager] App has lost audio focus, pausing all calls");
-              mCore.pauseAllCalls();
+                Log.w("[Core Manager] Audio focus lost but keeping calls running");
             }
         }
     }
 
     public void onBluetoothHeadsetStateChanged() {
         Log.i("[Core Manager] Bluetooth headset state changed, reload sound devices");
+        mCore.reloadSoundDevices();
+    }
+
+    public void onHeadsetStateChanged() {
+        Log.i("[Core Manager] Headset state changed, reload sound devices");
         mCore.reloadSoundDevices();
     }
 
@@ -313,8 +358,8 @@ public class CoreManager {
     }
 
     private void startService() {
-        mContext.startService(new Intent().setClass(mContext, mServiceClass));
         Log.i("[Core Manager] Starting service ", mServiceClass.getName());
+        mContext.startService(new Intent().setClass(mContext, mServiceClass));
     }
 
     private boolean isServiceRunning() {
@@ -330,10 +375,12 @@ public class CoreManager {
     private boolean isAndroidXMediaAvailable() {
         boolean available = false;
         try {
-            Class androixMedia = Class.forName("androidx.media.AudioAttributesCompat");
+            Class audioAttributesCompat = Class.forName("androidx.media.AudioAttributesCompat");
+            Class audioFocusRequestCompat = Class.forName("androidx.media.AudioFocusRequestCompat");
+            Class audioManagerCompat = Class.forName("androidx.media.AudioManagerCompat");
             available = true;
         } catch (ClassNotFoundException e) {
-            Log.w("[Core Manager] Couldn't find class androidx.media.AudioAttributesCompat");
+            Log.w("[Core Manager] Couldn't find class: ", e);
         } catch (Exception e) {
             Log.w("[Core Manager] Exception: " + e);
         }
@@ -352,7 +399,7 @@ public class CoreManager {
             sb.append(abi).append(", ");
         }
         Log.i(sb.substring(0, sb.length() - 2));
-		Log.i("=========================================");
+        Log.i("=========================================");
     }
 
     private void dumpLinphoneInformation() {
@@ -367,6 +414,6 @@ public class CoreManager {
         Log.i(sb.substring(0, sb.length() - 2));
         Log.i("PACKAGE=", org.linphone.core.BuildConfig.LIBRARY_PACKAGE_NAME);
         Log.i("BUILD TYPE=", org.linphone.core.BuildConfig.BUILD_TYPE);
-		Log.i("=========================================");
+        Log.i("=========================================");
     }
 }

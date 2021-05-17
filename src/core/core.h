@@ -103,7 +103,7 @@ public:
 
 	void enterBackground ();
 	void enterForeground ();
-	bool isInBackground ();
+	bool isInBackground () const;
 
 	// ---------------------------------------------------------------------------
 	// C-Core.
@@ -123,8 +123,8 @@ public:
 	unsigned int getCallCount () const;
 	std::shared_ptr<Call> getCurrentCall () const;
 	LinphoneStatus pauseAllCalls ();
-	void soundcardHintCheck ();
 	void soundcardActivateAudioSession (bool active);
+	void soundcardConfigureAudioSession ();
 	void soundcardEnableCallkit (bool enabled);
 	void soundcardAudioRouteChanged ();
 	LinphoneStatus terminateAllCalls ();
@@ -257,6 +257,8 @@ public:
 	/* Stop (ie cancel) and destroy a timer created by createTimer()*/
 
 	void destroyTimer(belle_sip_source_t *timer);
+	void onStopAsyncBackgroundTaskStarted(); /* Using background task to ensure stop core async ended */
+	void onStopAsyncBackgroundTaskStopped();
 private:
 	Core ();
 

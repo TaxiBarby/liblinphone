@@ -119,7 +119,7 @@ LINPHONE_PUBLIC bool_t linphone_core_is_echo_canceller_calibration_required(Linp
 /**
  * @ingroup IOS
  * @param core The #LinphoneCore object. @notnil
- * Special function to warm up  dtmf feeback stream. #linphone_core_stop_dtmf_stream must() be called before entering FG mode
+ * Special function to warm up  dtmf feeback stream. #linphone_core_stop_dtmf_stream() must be called before entering FG mode
  */
 LINPHONE_PUBLIC void linphone_core_start_dtmf_stream(LinphoneCore* core);
 
@@ -139,6 +139,13 @@ LINPHONE_PUBLIC void linphone_core_stop_dtmf_stream(LinphoneCore* core);
 LINPHONE_PUBLIC void linphone_core_activate_audio_session(LinphoneCore* core, bool_t actived);
 
 /**
+ * Special function to configure audio session with default settings. Must be called in ProviderDelegate's callbacks when answer an incoming call and start an outgoing call.
+ * @param core The #LinphoneCore object. @notnil
+ * @ingroup IOS
+ */
+LINPHONE_PUBLIC void linphone_core_configure_audio_session(LinphoneCore* core);
+
+/**
  * Special function to enable the callkit.
  * @param core The #LinphoneCore object. @notnil
  * @param enabled TRUE to enable callkit, FALSE to disable it.
@@ -150,8 +157,9 @@ LINPHONE_PUBLIC void linphone_core_enable_callkit (LinphoneCore* core, bool_t en
  * Special function to indicate if the audio route is changed. Must be called in the callback of AVAudioSessionRouteChangeNotification.
  * @param core The #LinphoneCore object. @notnil
  * @ingroup IOS
+ * @deprecated 07/01/2020 now handled in the linphone SDK directly
 */
-LINPHONE_PUBLIC void linphone_core_audio_route_changed (LinphoneCore *core);
+LINPHONE_DEPRECATED LINPHONE_PUBLIC void linphone_core_audio_route_changed (LinphoneCore *core);
 
 /**
  * Special function to check if the callkit is enabled, False by default.
